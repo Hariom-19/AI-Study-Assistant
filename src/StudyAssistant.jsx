@@ -187,16 +187,18 @@ Machine Learning works the same way! Instead of a child, it's a computer program
 // ── Updated callClaude with automatic demo fallback ───────────────────────────
 async function callClaude(systemPrompt, userPrompt) {
   try {
-    const res = await fetch("https://studyai-server-5brd.onrender.com", {
+   
+    const res = await fetch("http://localhost:3001/api/claude", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: JSON.stringify( {
         model: "claude-sonnet-4-6",
         max_tokens: 3500,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
       }),
     });
+   
 
     if (!res.ok) {
       const err = await res.json();
@@ -307,7 +309,8 @@ function UploadZone({ onTextReady }) {
       reader.onload = async (e) => {
         const base64 = e.target.result.split(",")[1];
         try {
-          const res = await fetch("https://studyai-server-5brd.onrender.com", {
+          const res = await fetch("http://localhost:3001/api/claude", {
+            // http://localhost:3001/api/claude   https://studyai-server-5brd.onrender.com
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
