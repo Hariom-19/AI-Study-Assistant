@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 // ── Palette & fonts loaded via Google Fonts in index.html, injected via style tag ──
 const GLOBAL_STYLE = `
@@ -187,16 +187,26 @@ Machine Learning works the same way! Instead of a child, it's a computer program
 // ── Updated callClaude with automatic demo fallback ───────────────────────────
 async function callClaude(systemPrompt, userPrompt) {
   try {
-    const res = await fetch("https://studyai-server-5brd.onrender.com", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 3500,
-        system: systemPrompt,
-        messages: [{ role: "user", content: userPrompt }],
-      }),
-    });
+    const controller = new AbortController();
+    // Wait 25 seconds before giving up
+    const timeout = setTimeout(() => controller.abort(), 25000);
+
+    const res = await fetch(
+      "https://studyai-server-5brd.onrender.com/api/claude",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 3500,
+          system: systemPrompt,
+          messages: [{ role: "user", content: userPrompt }],
+        }),
+      },
+    );
+
+    clearTimeout(timeout);
 
     if (!res.ok) {
       const err = await res.json();
@@ -206,8 +216,30 @@ async function callClaude(systemPrompt, userPrompt) {
     const data = await res.json();
     return data.content.map((b) => b.text || "").join("");
   } catch (err) {
-    // ── API failed → return demo fallback silently ──────────────────────────
-    console.warn("API failed, using demo fallback:", err.message);
+    if (err.name === "AbortError") {
+      // Server waking up - try one more time
+      try {
+        const res2 = await fetch(
+          "https://studyai-server-5brd.onrender.com/api/claude",
+          {
+            // http://localhost:3001/api/claude
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "claude-sonnet-4-6",
+              max_tokens: 3500,
+              system: systemPrompt,
+              messages: [{ role: "user", content: userPrompt }],
+            }),
+          },
+        );
+        const data = await res2.json();
+        return data.content.map((b) => b.text || "").join("");
+      } catch (err2) {
+        return getDemoFallback(systemPrompt);
+      }
+    }
+    console.warn("Using demo fallback:", err.message);
     return getDemoFallback(systemPrompt);
   }
 }
@@ -307,41 +339,51 @@ function UploadZone({ onTextReady }) {
       reader.onload = async (e) => {
         const base64 = e.target.result.split(",")[1];
         try {
-          const res = await fetch("https://studyai-server-5brd.onrender.com", {
-            // http://localhost:3001/api/claude   https://studyai-server-5brd.onrender.com
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model: "claude-sonnet-4-6",
-              max_tokens: 3500,
-              messages: [
-                {
-                  role: "user",
-                  content: [
-                    {
-                      type: "document",
-                      source: {
-                        type: "base64",
-                        media_type: "application/pdf",
-                        data: base64,
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 25000);
+
+          const res = await fetch(
+            "https://studyai-server-5brd.onrender.com/api/claude",
+            {
+              method: "POST",
+              signal: controller.signal,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model: "claude-sonnet-4-6",
+                max_tokens: 3500,
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "document",
+                        source: {
+                          type: "base64",
+                          media_type: "application/pdf",
+                          data: base64,
+                        },
                       },
-                    },
-                    {
-                      type: "text",
-                      text: "Extract and return ALL the text content from this PDF document. Return only the text, no commentary.",
-                    },
-                  ],
-                },
-              ],
-            }),
-          });
+                      {
+                        type: "text",
+                        text: "Extract and return ALL the text content from this PDF document. Return only the text, no commentary.",
+                      },
+                    ],
+                  },
+                ],
+              }),
+            },
+          );
+
+          clearTimeout(timeout);
           const data = await res.json();
           const text = data.content.map((b) => b.text || "").join("");
           onTextReady(text, file.name);
         } catch (err) {
+          // If PDF fails load demo notes silently
           onTextReady(DEMO_NOTES, file.name);
         }
       };
+
       reader.readAsDataURL(file);
     } else {
       const reader = new FileReader();
@@ -1151,6 +1193,11 @@ export default function App() {
   const [notes, setNotes] = useState("");
   const [fileName, setFileName] = useState("");
   const [tab, setTab] = useState("summary");
+
+  // Wake up Render server as soon as page loads
+  useEffect(() => {
+    fetch("https://studyai-server-5brd.onrender.com/").catch(() => {});
+  }, []);
 
   const handleText = (text, name) => {
     setNotes(text);
